@@ -1,0 +1,96 @@
+name: RDP Test
+
+# Short-lived public test workflow. It publishes the address and username to
+# RDP_INFO.txt; the password comes from the repository secret RDP_PASSWORD and
+# is never written to the repository or the logs.
+
+on:
+  workflow_dispatch:
+    inputs:
+      frp_server:
+        description: "frps server address"
+        required: false
+        default: "47.98.228.129"
+      server_port:
+        description: "frps bindPort (control port)"
+        required: false
+        default: "7000"
+      remote_port:
+        description: "Remote port exposed by frps for RDP (0 = auto)"
+        required: false
+        default: "0"
+
+permissions:
+  contents: write
+
+env:
+  FRP_SERVER_ADDR: ${{ inputs.frp_server }}
+  INPUT_SERVER_PORT: ${{ inputs.server_port }}
+  INPUT_REMOTE_PORT: ${{ inputs.remote_port }}
+
+jobs:
+  test-rdp:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure Core RDP Settings
+        shell: powershell
+        run: .\scripts\Enable-Rdp.ps1
+
+      - name: Create RDP User with Secure Password
+        shell: powershell
+        run: |
+          if (-not $env:RDP_PASSWORD) { throw "Repository secret RDP_PASSWORD is not set." }
+          .\scripts\New-RdpUser.ps1 -Password $env:RDP_PASSWORD -HidePassword
+
+      - name: Install frpc (self-hosted frp)
+        shell: powershell
+        run: |
+          . .\scripts\FrpHelpers.ps1
+          $frpc = .\scripts\Install-Frpc.ps1
+          if (-not $frpc) { throw "frpc installation failed" }
+          Set-GitHubEnvValue -Values @{ FRPC_PATH = $frpc }
+
+      - name: Establish Tunnel and Publish Access Info
+        shell: powershell
+        run: |
+          $serverPort = 7000
+          if ($env:INPUT_SERVER_PORT -match '^\d+$') { $serverPort = [int]$env:INPUT_SERVER_PORT }
+          $remotePort = 0
+          if ($env:INPUT_REMOTE_PORT -match '^\d+$') { $remotePort = [int]$env:INPUT_REMOTE_PORT }
+
+          .\scripts\Start-FrpTunnel.ps1 `
+            -ServerAddr $env:FRP_SERVER_ADDR `
+            -ServerPort $serverPort `
+            -RemotePort $remotePort `
+            -FrpcPath $env:FRPC_PATH `
+            -HidePassword
+
+          $state = Get-Content "$env:ProgramData\rdp-frp\state.json" -Raw | ConvertFrom-Json
+          $info = @(
+            "RDP over frp - test run $env:GITHUB_RUN_ID",
+            "Address : $($state.serverAddr):$($state.remotePort)",
+            "Username: $($state.userName)",
+            "Password: stored in repository secret RDP_PASSWORD",
+            "Started : $($state.startedAt)",
+            "Run URL : $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+          ) -join "`r`n"
+          Set-Content -LiteralPath "RDP_INFO.txt" -Value $info -Encoding UTF8
+          Get-Content -LiteralPath "RDP_INFO.txt"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add RDP_INFO.txt
+          git commit -m "RDP test info for run $env:GITHUB_RUN_ID"
+          git push origin HEAD:main
+
+      - name: Maintain Connection
+        if: always()
+        shell: powershell
+        run: .\scripts\Watch-FrpTunnel.ps1 -HidePassword
