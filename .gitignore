@@ -1,0 +1,7 @@
+# Runtime artifacts (the scripts normally write to C:\ProgramData\rdp-frp)
+*.log
+*.log.err
+frpc.toml
+state.json
+credentials.json
+frp/
