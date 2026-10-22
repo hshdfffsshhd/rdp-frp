@@ -1,0 +1,79 @@
+name: RDP
+
+# The RDP password comes from the repository secret RDP_PASSWORD and is hidden
+# from logs and summaries. In a public repository the frps address and remote
+# port are still visible; use a private repository for real use.
+
+on:
+  workflow_dispatch:
+    inputs:
+      frp_server:
+        description: "frps server address"
+        required: false
+        default: "47.98.228.129"
+      server_port:
+        description: "frps bindPort (control port)"
+        required: false
+        default: "7000"
+      remote_port:
+        description: "Remote port exposed by frps for RDP (0 = auto)"
+        required: false
+        default: "0"
+
+env:
+  FRP_SERVER_ADDR: ${{ inputs.frp_server }}
+  INPUT_SERVER_PORT: ${{ inputs.server_port }}
+  INPUT_REMOTE_PORT: ${{ inputs.remote_port }}
+
+jobs:
+  secure-rdp:
+    runs-on: windows-latest
+    timeout-minutes: 360
+    env:
+      RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure Core RDP Settings
+        shell: powershell
+        run: .\scripts\Enable-Rdp.ps1
+
+      - name: Create RDP User with Secure Password
+        shell: powershell
+        run: |
+          if (-not $env:RDP_PASSWORD) { throw "Repository secret RDP_PASSWORD is not set." }
+          .\scripts\New-RdpUser.ps1 -Password $env:RDP_PASSWORD -HidePassword
+
+      - name: Install frpc (self-hosted frp, no third-party tunnel)
+        shell: powershell
+        run: |
+          . .\scripts\FrpHelpers.ps1
+          $frpc = .\scripts\Install-Frpc.ps1
+          if (-not $frpc) { throw "frpc installation failed" }
+          Set-GitHubEnvValue -Values @{ FRPC_PATH = $frpc }
+
+      - name: Establish frp Tunnel
+        shell: powershell
+        run: |
+          $serverPort = 7000
+          if ($env:INPUT_SERVER_PORT -match '^\d+$') { $serverPort = [int]$env:INPUT_SERVER_PORT }
+          $remotePort = 0
+          if ($env:INPUT_REMOTE_PORT -match '^\d+$') { $remotePort = [int]$env:INPUT_REMOTE_PORT }
+
+          .\scripts\Start-FrpTunnel.ps1 `
+            -ServerAddr $env:FRP_SERVER_ADDR `
+            -ServerPort $serverPort `
+            -RemotePort $remotePort `
+            -FrpcPath $env:FRPC_PATH `
+            -HidePassword
+
+      - name: Verify RDP Accessibility
+        shell: powershell
+        run: .\scripts\Test-FrpTunnel.ps1 -HidePassword
+
+      - name: Maintain Connection
+        if: always()
+        shell: powershell
+        run: .\scripts\Watch-FrpTunnel.ps1 -HidePassword
