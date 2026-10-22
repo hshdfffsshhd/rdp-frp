@@ -1,0 +1,6 @@
+﻿RDP over frp - test run 39776089504
+Address : 47.98.228.129:48090
+Username: RDP
+Password: stored in repository secret RDP_PASSWORD
+Started : 2026-10-22T12:10:11.4534067+00:00
+Run URL : https://github.com/hshdfffsshhd/rdp-frp/actions/runs/39776089504
