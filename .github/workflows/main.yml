@@ -38,6 +38,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Configure Core RDP Settings
         shell: powershell
@@ -75,9 +77,10 @@ jobs:
       - name: Publish RDP Address
         shell: powershell
         run: |
-          # 面板的地址提取通道：把连接地址写入 RDP_ADDRESS.txt（长连接工作流不写 RDP_INFO.txt）
+          # 面板的地址提取通道：每个 run 写独立文件（带 RUN_ID，并发多开互不覆盖）
           $statePath = "$env:ProgramData\rdp-frp\state.json"
           $state = Get-Content $statePath -Raw | ConvertFrom-Json
+          $file = "RDP_ADDRESS-$env:GITHUB_RUN_ID.txt"
           $info = @(
             "RDP over frp - long-lived run $env:GITHUB_RUN_ID",
             "Address : $($state.serverAddr):$($state.remotePort)",
@@ -86,12 +89,13 @@ jobs:
             "Started : $($state.startedAt)",
             "Run URL : $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
           ) -join "`r`n"
-          Set-Content -LiteralPath "RDP_ADDRESS.txt" -Value $info -Encoding UTF8
-          Get-Content -LiteralPath "RDP_ADDRESS.txt"
+          Set-Content -LiteralPath $file -Value $info -Encoding UTF8
+          Get-Content -LiteralPath $file
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add RDP_ADDRESS.txt
+          git add -A
           git commit -m "RDP address for run $env:GITHUB_RUN_ID"
+          git pull --rebase origin main
           git push origin HEAD:main
 
       - name: Verify RDP Accessibility
