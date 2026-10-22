@@ -1,0 +1,17 @@
+# rdp-frp client configuration example.
+# The setup script generates this file automatically in C:\ProgramData\rdp-frp\frpc.toml.
+serverAddr = "47.98.228.129"
+serverPort = 7000
+
+[log]
+to = "console"
+level = "info"
+
+[[proxies]]
+name = "rdp-example"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 3389
+remotePort = 30000
+transport.useEncryption = true
+transport.useCompression = false
